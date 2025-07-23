@@ -1,159 +1,91 @@
 import streamlit as st
 import pandas as pd
-import re
+from processors.nubank import processar_arquivo_nubank
+from processors.banco_inter import processar_arquivo_inter
 
-# Configuração inicial
+# Configuração da página
 st.set_page_config(page_title="FaturAI", layout="wide")
 st.title("📊 FaturAI - Análise Inteligente de Faturas")
 
-# Definição da data base para vencimento da fatura
-data_base = pd.Timestamp("2025-07-08")  # Tipo Timestamp (evita conflitos)
+# Inicializa session_state para armazenar os arquivos processados
+if "faturas_processadas" not in st.session_state:
+    st.session_state["faturas_processadas"] = {}
 
-# ========================
-# Funções auxiliares
-# ========================
+# Upload de múltiplos arquivos
+uploaded_files = st.file_uploader("📎 Carregue uma ou mais faturas (CSV ou Excel)", type=["csv", "xls", "xlsx"], accept_multiple_files=True)
 
-# Classifica a categoria com base no título
-def classificar_categoria(title):
-    title = str(title).lower()
+if uploaded_files:
+    for uploaded_file in uploaded_files:
+        nome_arquivo = uploaded_file.name
 
-    if any(x in title for x in ["farmacia", "dimed", "panvel", "raia"]):
-        return "Farmácia"
-    elif any(x in title for x in ["bourbon", "carrefour", "lahude", "cestto", "zaffari", "pkr comercio"]):
-        return "Mercado"
-    elif any(x in title for x in ["clinica de vacinas", "colchoes ortobom"]):
-        return "Saúde"
-    elif any(x in title for x in ["belshop", "oboticario", "perfumes e prese"]):
-        return "Beleza"
-    elif any(x in title for x in ["aquila", "produtos globo", "amazon", "multiplos esportes", "villaggio", "pampa burguer"]):
-        return "Lazer"
-    elif any(x in title for x in ["kiwify", "google one", "nio fibra"]):
-        return "Educação"
-    elif any(x in title for x in ["lojas renner", "shein"]):
-        return "Vestuário"
-    elif any(x in title for x in ["lyon park", "sigapay"]):
-        return "Estacionamento"
-    elif any(x in title for x in ["surdinas car"]):
-        return "Manutenção Veicular"
-    elif any(x in title for x in ["centervatti"]):
-        return "Manutenção Predial"
-    elif any(x in title for x in ["uber"]):
-        return "Mobilidade"
-    elif any(x in title for x in ["mercadolivre", "motorola", "conta vivo"]):
-        return "Compras Online"
-    else:
-        return "Outros"
+        with st.expander(f"📄 {nome_arquivo}", expanded=True):
+            layout = st.selectbox("Layout da fatura", ["Nubank", "Banco Inter"], key=f"layout_{nome_arquivo}")
 
+            if st.button(f"Processar {nome_arquivo}", key=f"processar_{nome_arquivo}"):
+                try:
+                    # Processamento de acordo com o layout
+                    if layout == "Nubank":
+                        df_resultado = processar_arquivo_nubank(uploaded_file)
+                    elif layout == "Banco Inter":
+                        df_resultado = processar_arquivo_inter(uploaded_file)
+                    else:
+                        st.warning("⚠️ Layout não suportado.")
+                        continue
 
+                    # Padroniza colunas
+                    df_resultado = df_resultado.rename(columns={
+                        "data_vcto": "data_vcto",
+                        "title": "lancamento",
+                        "amount": "valor",
+                        "categoria": "categoria",
+                        "parcela": "parcela"
+                    })
 
-# Extrai número da parcela atual e total (ex: 2/10)
-def extrair_parcelas(title):
-    resultado = re.search(r'(\d+)\s*/\s*(\d+)', str(title))
-    if resultado:
-        return int(resultado.group(1)), int(resultado.group(2))
-    else:
-        return 1, 1  # Considera como parcela única se não houver padrão
+                    df_resultado["mes"] = df_resultado["data_vcto"].dt.to_period("M").astype(str)
 
-# Gera novas linhas com as parcelas futuras
-def gerar_parcelas(row):
-    linhas = []
-    diferenca = row['parcela_final'] - row['parcela_atual']
-    for i in range(diferenca + 1):
-        nova_linha = row.copy()
-        nova_linha['data_vcto'] = data_base + pd.DateOffset(months=i)
-        nova_linha['parcela'] = f"{row['parcela_atual'] + i}/{row['parcela_final']}"
-        linhas.append(nova_linha)
-    return linhas
+                    # Salva no session_state
+                    st.session_state["faturas_processadas"][nome_arquivo] = df_resultado
+                    st.success("✅ Arquivo processado com sucesso!")
 
-# Processa o DataFrame: extrai, explode e retorna novo DataFrame
-def processar_faturas(df):
-    novas_linhas = []
+                except Exception as e:
+                    st.error(f"❌ Erro ao processar o arquivo {nome_arquivo}: {e}")
 
-    for _, row in df.iterrows():
-        row['parcela_atual'], row['parcela_final'] = extrair_parcelas(row['title'])
-        
-        if row['parcela_final'] > 1:
-            novas_linhas.extend(gerar_parcelas(row))
-        else:
-            row['data_vcto'] = data_base  # Corrigido para fixar no mês 7
-            row['parcela'] = None
-            novas_linhas.append(row)
+# Mostra resultados apenas se houver dados processados
+if st.session_state["faturas_processadas"]:
+    df_consolidado = pd.concat(
+        st.session_state["faturas_processadas"].values(),
+        ignore_index=True
+    )
 
-    df_resultado = pd.DataFrame(novas_linhas)
+    st.divider()
+    st.subheader("📅 Faturas Consolidadas com Parcelas Expandidas")
+    st.dataframe(
+        df_consolidado[["data_vcto", "lancamento", "categoria", "valor", "parcela"]]
+        .sort_values(by="data_vcto")
+        .reset_index(drop=True)
+    )
 
-    # Garante que data_vcto seja Timestamp
-    df_resultado['data_vcto'] = pd.to_datetime(df_resultado['data_vcto'])
+    # Campo de renda
+    renda_mensal = st.number_input("💰 Informe sua renda mensal (R$)", min_value=0.0, format="%.2f")
 
-    return df_resultado.drop(columns=['parcela_atual', 'parcela_final'], errors='ignore')
+    if renda_mensal > 0:
+        resumo = df_consolidado.groupby("mes").agg(
+            total_gastos=("valor", "sum")
+        ).reset_index()
 
-# ========================
-# Upload e processamento
-# ========================
+        resumo["percentual_renda"] = (resumo["total_gastos"] / renda_mensal * 100).round(1)
 
-uploaded_file = st.file_uploader("📎 Carregue sua fatura (CSV ou Excel)", type=["csv", "xls", "xlsx"])
+        st.subheader("📊 Comprometimento da Renda por Mês")
+        st.dataframe(resumo)
+        st.line_chart(resumo.set_index("mes")[["percentual_renda"]])
 
-if uploaded_file:
-    try:
-        # Leitura do arquivo conforme o tipo
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, sep=None, engine='python')
-        else:
-            df = pd.read_excel(uploaded_file)
+        st.subheader("📊 Gastos por Categoria ao Longo dos Meses")
 
-        # Converte coluna de data
-        df['date'] = pd.to_datetime(df['date'])
+        df_cat_mes = df_consolidado.groupby(["mes", "categoria"]).agg(
+            total_gasto=("valor", "sum")
+        ).reset_index()
 
-        # Somente valores maiores do que zero
-        df = df[df['amount'] > 0]
+        df_pivot = df_cat_mes.pivot(index="mes", columns="categoria", values="total_gasto").fillna(0)
 
-        df['categoria'] = df['title'].apply(classificar_categoria)
-
-        # Processa faturas (explosão de parcelas)
-        df_resultado = processar_faturas(df)
-
-        # Exibição
-        st.success("✅ Arquivo processado com sucesso!")
-        st.subheader("📅 Faturas com parcelas expandidas:")
-        st.dataframe(
-            df_resultado[['data_vcto', 'title', 'categoria','amount', 'parcela']].sort_values(by='data_vcto').reset_index(drop=True)
-        )
-
-        # Campo de renda
-        renda_mensal = st.number_input("💰 Informe sua renda mensal (R$)", min_value=0.0, format="%.2f")
-
-        # Cálculo do comprometimento da renda
-        if renda_mensal > 0:
-            df_resultado['mes'] = df_resultado['data_vcto'].dt.to_period("M").astype(str)
-
-            resumo = df_resultado.groupby('mes').agg(
-                total_gastos=('amount', 'sum')
-            ).reset_index()
-
-            resumo['percentual_renda'] = (resumo['total_gastos'] / renda_mensal * 100).round(1)
-
-            st.subheader("📊 Comprometimento da Renda por Mês")
-            st.dataframe(resumo)
-
-            st.line_chart(resumo.set_index('mes')[['percentual_renda']])
-
-        # Distribuição de gastos por categoria
-            st.subheader("📊 Gastos por Categoria ao Longo dos Meses")
-
-            df_resultado['mes'] = df_resultado['data_vcto'].dt.to_period("M").astype(str)
-
-            # Total por mês e categoria
-            df_cat_mes = df_resultado.groupby(['mes', 'categoria']).agg(
-                total_gasto=('amount', 'sum')
-            ).reset_index()
-
-            # Tabela pivô para visualização
-            df_pivot = df_cat_mes.pivot(index='mes', columns='categoria', values='total_gasto').fillna(0)
-
-            st.dataframe(df_pivot)
-
-            # Gráfico de barras agrupadas por mês
-            st.bar_chart(df_pivot)
-
-
-    except Exception as e:
-        st.error(f"❌ Erro ao processar o arquivo: {e}")
+        st.dataframe(df_pivot)
+        st.bar_chart(df_pivot)
