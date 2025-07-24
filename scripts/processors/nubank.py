@@ -40,7 +40,7 @@ def classificar_categoria(title):
 # Upload e processamento
 # ========================
 
-def processar_arquivo_nubank(uploaded_file):
+def processar_arquivo_nubank(uploaded_file, vencimento):
     # Leitura do arquivo conforme o tipo
     if uploaded_file.name.endswith('.csv'):
         df = pd.read_csv(uploaded_file, sep=None, engine='python')
@@ -51,7 +51,7 @@ def processar_arquivo_nubank(uploaded_file):
     df = df[df['amount'] > 0]
     df['categoria'] = df['title'].apply(classificar_categoria)
 
-    df_resultado = processar_faturas(df)
+    df_resultado = processar_faturas(df, data_base=pd.to_datetime(vencimento))
 
     df_resultado = df_resultado.rename(columns={
         'title': 'lancamento',
