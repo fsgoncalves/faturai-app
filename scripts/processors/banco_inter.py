@@ -27,7 +27,7 @@ def classificar_categoria(tipo):
 # Upload e processamento
 # ========================
 
-def processar_arquivo_inter(uploaded_file):
+def processar_arquivo_inter(uploaded_file, vencimento):
     if uploaded_file.name.endswith('.csv'):
         df = pd.read_csv(uploaded_file, sep=None, engine='python')
     else:
@@ -75,6 +75,6 @@ def processar_arquivo_inter(uploaded_file):
     df = df[df['amount'] > 0]
     df['categoria'] = df['categoria'].apply(classificar_categoria)
 
-    df_resultado = processar_faturas(df, coluna_parcela='tipo')
+    df_resultado = processar_faturas(df, data_base=pd.to_datetime(vencimento), coluna_parcela='tipo')
 
     return df_resultado[['data_vcto', 'title', 'categoria', 'amount', 'parcela']]

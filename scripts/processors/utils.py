@@ -1,7 +1,7 @@
 import pandas as pd
 import re
 
-data_base = pd.Timestamp("2025-07-08")  # Tipo Timestamp (evita conflitos)
+#data_base = pd.Timestamp("2025-07-08")  # Tipo Timestamp (evita conflitos)
 
 # Extrai número da parcela atual e total (ex: 2/10)
 def extrair_parcelas(title):
@@ -12,7 +12,7 @@ def extrair_parcelas(title):
         return 1, 1  # Considera como parcela única se não houver padrão
 
 # Gera novas linhas com as parcelas futuras
-def gerar_parcelas(row):
+def gerar_parcelas(row, data_base):
     linhas = []
     diferenca = row['parcela_final'] - row['parcela_atual']
     for i in range(diferenca + 1):
@@ -23,14 +23,18 @@ def gerar_parcelas(row):
     return linhas
 
 # Processa o DataFrame: extrai, explode e retorna novo DataFrame
-def processar_faturas(df,coluna_parcela='title'):
+def processar_faturas(df, data_base, coluna_parcela='title'):
+
+    if data_base is None:
+        raise ValueError("A data_base (vencimento) deve ser informada.")
+
     novas_linhas = []
 
     for _, row in df.iterrows():
         row['parcela_atual'], row['parcela_final'] = extrair_parcelas(row[coluna_parcela])
         
         if row['parcela_final'] > 1:
-            novas_linhas.extend(gerar_parcelas(row))
+            novas_linhas.extend(gerar_parcelas(row, data_base))
         else:
             row['data_vcto'] = data_base  # Corrigido para fixar no mês 7
             row['parcela'] = None

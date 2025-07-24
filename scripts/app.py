@@ -21,13 +21,18 @@ if uploaded_files:
         with st.expander(f"📄 {nome_arquivo}", expanded=True):
             layout = st.selectbox("Layout da fatura", ["Nubank", "Banco Inter"], key=f"layout_{nome_arquivo}")
 
+            vencimento = st.date_input(
+                "📅 Data de vencimento da fatura",
+                key=f"vencimento_{nome_arquivo}"
+            )
+
             if st.button(f"Processar {nome_arquivo}", key=f"processar_{nome_arquivo}"):
                 try:
                     # Processamento de acordo com o layout
                     if layout == "Nubank":
-                        df_resultado = processar_arquivo_nubank(uploaded_file)
+                        df_resultado = processar_arquivo_nubank(uploaded_file, vencimento)
                     elif layout == "Banco Inter":
-                        df_resultado = processar_arquivo_inter(uploaded_file)
+                        df_resultado = processar_arquivo_inter(uploaded_file, vencimento)
                     else:
                         st.warning("⚠️ Layout não suportado.")
                         continue
